@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In | Plated</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--cream); }
+    .auth-container { background:var(--white); padding:48px; border-radius:var(--radius-lg); box-shadow:var(--shadow-lg); width:100%; max-width:440px; border:1px solid var(--border); }
+    .auth-header { text-align:center; margin-bottom:32px; }
+    .auth-header h1 { font-family:'Playfair Display',serif; font-size:2rem; color:var(--charcoal); margin-bottom:8px; }
+    .auth-header p { color:var(--muted); font-size:0.95rem; }
+    .form-group { margin-bottom:20px; }
+    .form-group label { display:block; font-size:0.85rem; font-weight:600; color:var(--slate); margin-bottom:8px; }
+    .form-group input { width:100%; padding:12px 16px; border-radius:var(--radius); border:1.5px solid var(--border); font-family:inherit; font-size:0.9rem; transition:all 0.2s; background:var(--cream); }
+    .form-group input:focus { border-color:var(--accent); background:var(--white); outline:none; }
+    .btn-auth { width:100%; padding:14px; border-radius:var(--radius); border:none; background:var(--accent); color:var(--white); font-weight:600; font-size:1rem; cursor:pointer; transition:all 0.2s; font-family:inherit; }
+    .btn-auth:hover { background:var(--accent-hover); transform:translateY(-1px); }
+    .auth-footer { text-align:center; margin-top:24px; font-size:0.9rem; color:var(--muted); }
+    .auth-footer a { color:var(--accent); font-weight:600; text-decoration:none; }
+    .auth-footer a:hover { text-decoration:underline; }
+    .error-msg { color:var(--red); font-size:0.85rem; margin-top:12px; display:none; padding:10px; background:#FEE2E2; border-radius:6px; }
+    .logo-link { font-family:'Playfair Display',serif; font-size:2rem; font-weight:700; color:var(--charcoal); text-decoration:none; display:block; margin-bottom:16px; }
+    .logo-link span { color:var(--accent); }
+    .quick-login { background:var(--cream); border-radius:var(--radius); padding:12px 16px; margin-bottom:24px; font-size:0.82rem; color:var(--muted); border:1px solid var(--border); }
+    .quick-login strong { color:var(--accent); display:block; margin-bottom:6px; }
+    .quick-login span { display:block; line-height:1.8; }
+  </style>
+</head>
+<body>
+  <div class="auth-container">
+    <div class="auth-header">
+      <a class="logo-link" href="catering-platform.html">Plated<span>.</span></a>
+      <h1>Welcome Back</h1>
+      <p>Log in to manage your catering career.</p>
+    </div>
+
+    <!-- Quick test credentials -->
+    <div class="quick-login">
+      <strong>🧪 Test Credentials</strong>
+      <span>Seeker: marco@plated.com / Seeker@123</span>
+      <span>Employer: hr@grandregency.com / Employer@123</span>
+    </div>
+
+    <form id="login-form">
+      <div class="form-group">
+        <label for="email">Email Address</label>
+        <input type="email" id="email" placeholder="name@company.com" required>
+      </div>
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="••••••••" required>
+      </div>
+      <button type="submit" class="btn-auth">Sign In</button>
+      <div id="error-msg" class="error-msg"></div>
+    </form>
+
+    <div class="auth-footer">
+      Don't have an account? <a href="signup.html">Create one</a>
+    </div>
+  </div>
+  <script src="auth.js"></script>
+</body>
+</html>

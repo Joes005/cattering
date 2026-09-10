@@ -1,0 +1,16 @@
+# Env files (never commit real secrets — .env.example files are fine)
+.env
+*/.env
+**/.env
+
+# Backend (Python)
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+
+# Node (any package, including legacy)
+node_modules/
+frontend/dist/
+
+# OS / editor
+.DS_Store
