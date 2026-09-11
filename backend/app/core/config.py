@@ -15,10 +15,8 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRES_MINUTES: int = 60 * 24 * 7  # 7 days
 
-    STRIPE_SECRET_KEY: str | None = None
-    STRIPE_WEBHOOK_SECRET: str | None = None
-
     CLIENT_URL: str = "http://localhost:5173"
+    UPLOAD_DIR: str = "uploads"
 
     @property
     def database_url(self) -> str:

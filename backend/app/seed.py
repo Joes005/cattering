@@ -1,44 +1,47 @@
-from datetime import datetime, timedelta, timezone
-
-from app.core.security import hash_password
-from app.db.database import Base, SessionLocal, engine
+from app.core.permissions import DEFAULT_ROLE_PERMISSIONS, PERMISSIONS
+from app.core.security import effective_permissions, hash_password
+from app.db.database import SessionLocal
 from app.models.models import (
-    Booking,
-    BookingStatus,
-    Category,
-    Event,
-    Package,
+    Client,
+    Company,
+    CompanyMember,
+    EmploymentRole,
+    GlobalRole,
+    Permission,
+    RolePermission,
     User,
-    UserRole,
-    VendorProfile,
 )
 
-Base.metadata.create_all(bind=engine)
 db = SessionLocal()
 
-CATEGORIES = [
-    ("Wedding Catering", "wedding-catering", "💍"),
-    ("Corporate Events", "corporate-events", "💼"),
-    ("Birthday Parties", "birthday-parties", "🎂"),
-    ("Live Counters", "live-counters", "🍳"),
-    ("Buffet Service", "buffet-service", "🍽"),
-]
+
+def seed_permissions():
+    existing = {p.key for p in db.query(Permission).all()}
+    for key, module, description in PERMISSIONS:
+        if key not in existing:
+            db.add(Permission(key=key, module=module, description=description))
+    db.commit()
+
+    permissions_by_key = {p.key: p for p in db.query(Permission).all()}
+    existing_role_perms = {(rp.employment_role, rp.permission_id) for rp in db.query(RolePermission).all()}
+    for role, keys in DEFAULT_ROLE_PERMISSIONS.items():
+        for key in keys:
+            perm = permissions_by_key[key]
+            if (role, perm.id) not in existing_role_perms:
+                db.add(RolePermission(employment_role=role, permission_id=perm.id))
+    db.commit()
 
 
-def get_or_create_category(name, slug, icon):
-    cat = db.query(Category).filter(Category.slug == slug).first()
-    if not cat:
-        cat = Category(name=name, slug=slug, icon=icon)
-        db.add(cat)
-        db.commit()
-        db.refresh(cat)
-    return cat
-
-
-def get_or_create_user(name, email, password, role, phone=None):
+def get_or_create_user(full_name, email, password, global_role, phone=None):
     user = db.query(User).filter(User.email == email).first()
     if not user:
-        user = User(name=name, email=email, password_hash=hash_password(password), role=role, phone=phone)
+        user = User(
+            full_name=full_name,
+            email=email,
+            password_hash=hash_password(password),
+            global_role=global_role,
+            phone=phone,
+        )
         db.add(user)
         db.commit()
         db.refresh(user)
@@ -46,97 +49,62 @@ def get_or_create_user(name, email, password, role, phone=None):
 
 
 def main():
-    categories = [get_or_create_category(*c) for c in CATEGORIES]
+    seed_permissions()
 
-    admin = get_or_create_user("Admin", "admin@plated.com", "Admin@1234", UserRole.admin)
+    get_or_create_user("Priya Nathan", "admin@plated.com", "Admin@1234", GlobalRole.admin)
 
-    vendor_user = get_or_create_user(
-        "Grand Regency Catering", "hr@grandregency.com", "Vendor@123", UserRole.vendor, "+1-555-0100"
-    )
-    vendor_profile = db.query(VendorProfile).filter(VendorProfile.user_id == vendor_user.id).first()
-    if not vendor_profile:
-        vendor_profile = VendorProfile(
-            user_id=vendor_user.id,
-            business_name="Grand Regency Catering",
-            description="Full-service catering for weddings and large corporate events.",
-            cuisine_types="Continental,South Indian,North Indian",
-            city="Chennai",
-            address="12 Anna Salai, Chennai",
-            price_per_plate_min=350,
-            price_per_plate_max=1200,
-            min_guests=50,
-            max_guests=1000,
-            avg_rating=4.7,
-            rating_count=32,
-            is_verified=True,
+    company = db.query(Company).filter(Company.slug == "grand-regency-catering").first()
+    if not company:
+        company = Company(
+            name="Grand Regency Catering",
+            slug="grand-regency-catering",
+            gst_number="33AAAAA0000A1Z5",
+            currency="INR",
         )
-        db.add(vendor_profile)
+        db.add(company)
         db.commit()
-        db.refresh(vendor_profile)
+        db.refresh(company)
 
-    if not db.query(Package).filter(Package.vendor_id == vendor_profile.id).first():
-        db.add_all(
-            [
-                Package(
-                    vendor_id=vendor_profile.id,
-                    category_id=categories[0].id,
-                    title="Royal Wedding Buffet",
-                    description="A lavish multi-cuisine buffet with live counters, perfect for a 300+ guest wedding.",
-                    price_per_plate=850,
-                    min_guests=200,
-                    max_guests=1000,
-                    menu_items="Live Chaat Counter, Paneer Tikka, Chicken Chettinad, Biryani, Dessert Bar",
-                ),
-                Package(
-                    vendor_id=vendor_profile.id,
-                    category_id=categories[1].id,
-                    title="Corporate Lunch Package",
-                    description="Efficient, professional plated lunch service for offices and conferences.",
-                    price_per_plate=400,
-                    min_guests=30,
-                    max_guests=200,
-                    menu_items="Salad Bar, Grilled Chicken/Paneer, Rice, Curry, Dessert",
-                ),
-            ]
-        )
+    owner = get_or_create_user("Arun Kumar", "owner@grandregency.com", "Owner@123", GlobalRole.company_user, "+91-98400-10001")
+    if not db.query(CompanyMember).filter(CompanyMember.user_id == owner.id, CompanyMember.company_id == company.id).first():
+        db.add(CompanyMember(company_id=company.id, user_id=owner.id, employment_role=EmploymentRole.owner, job_title="Founder & Owner"))
         db.commit()
 
-    organizer = get_or_create_user(
-        "Marco Rossi", "marco@plated.com", "Seeker@123", UserRole.organizer, "+1-555-0200"
-    )
+    employees = [
+        ("Rahul Menon", "rahul.chef@grandregency.com", "Chef@123", EmploymentRole.manager, "Head Chef", "+91-98400-10002"),
+        ("Kavitha Raj", "kavitha.ops@grandregency.com", "Ops@1234", EmploymentRole.manager, "Operations Manager", "+91-98400-10003"),
+        ("Suresh Babu", "suresh.service@grandregency.com", "Staff@123", EmploymentRole.staff, "Service Captain", "+91-98400-10004"),
+        ("Divya Shree", "divya.kitchen@grandregency.com", "Staff@123", EmploymentRole.staff, "Kitchen Staff", "+91-98400-10005"),
+        ("Manoj Kumar", "manoj.delivery@grandregency.com", "Staff@123", EmploymentRole.staff, "Delivery & Setup", "+91-98400-10006"),
+    ]
+    for full_name, email, password, role, job_title, phone in employees:
+        user = get_or_create_user(full_name, email, password, GlobalRole.company_user, phone)
+        if not db.query(CompanyMember).filter(CompanyMember.user_id == user.id, CompanyMember.company_id == company.id).first():
+            db.add(CompanyMember(company_id=company.id, user_id=user.id, employment_role=role, job_title=job_title))
+    db.commit()
 
-    if not db.query(Event).filter(Event.organizer_id == organizer.id).first():
-        event = Event(
-            organizer_id=organizer.id,
-            title="Marco & Elena's Wedding",
-            event_type="Wedding",
-            event_date=datetime.now(timezone.utc) + timedelta(days=60),
-            guest_count=250,
-            location="Chennai, India",
-            budget_min=150000,
-            budget_max=250000,
-            notes="Looking for multi-cuisine buffet with a live counter.",
-        )
-        db.add(event)
-        db.commit()
-        db.refresh(event)
+    clients_data = [
+        ("Marco & Elena Rossi", "marco@plated.com", "Seeker@123", "+91-98400-20001"),
+        ("Infosys Chennai HR", "hr.events@infosys-demo.com", "Client@123", "+91-98400-20002"),
+        ("Meera Krishnan", "meera.k@plated.com", "Client@123", "+91-98400-20003"),
+        ("Ashok Textiles Pvt Ltd", "events@ashoktextiles-demo.com", "Client@123", "+91-98400-20004"),
+        ("Lavanya & Karthik", "lavanya.k@plated.com", "Client@123", "+91-98400-20005"),
+    ]
+    for full_name, email, password, phone in clients_data:
+        user = get_or_create_user(full_name, email, password, GlobalRole.client, phone)
+        if not db.query(Client).filter(Client.user_id == user.id, Client.company_id == company.id).first():
+            db.add(Client(company_id=company.id, user_id=user.id, name=full_name, email=email, phone=phone))
+    db.commit()
 
-        package = db.query(Package).filter(Package.vendor_id == vendor_profile.id).first()
-        booking = Booking(
-            event_id=event.id,
-            package_id=package.id,
-            vendor_id=vendor_profile.id,
-            organizer_id=organizer.id,
-            status=BookingStatus.pending,
-            message="Hi! We'd love a quote for ~250 guests.",
-        )
-        db.add(booking)
-        db.commit()
+    print("Seed complete.\n")
+    print("Admin login:        admin@plated.com / Admin@1234")
+    print("Company owner:      owner@grandregency.com / Owner@123")
+    print("Employee (manager): rahul.chef@grandregency.com / Chef@123")
+    print("Employee (staff):   suresh.service@grandregency.com / Staff@123")
+    print("Client:              marco@plated.com / Seeker@123")
 
-    print("Seed complete.")
-    print("Admin login:     admin@plated.com / Admin@1234")
-    print("Vendor login:    hr@grandregency.com / Vendor@123")
-    print("Organizer login: marco@plated.com / Seeker@123")
+    owner_perms = sorted(effective_permissions(db, owner, company.id))
+    print(f"\nOwner effective permissions ({len(owner_perms)}): {owner_perms}")
 
 
 if __name__ == "__main__":

@@ -1,106 +1,74 @@
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from datetime import datetime, timezone
+
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
-from app.core.security import get_current_user
+from app.core.notify import notify
+from app.core.payments_logic import apply_payment_effects
+from app.core.security import get_accessible_event_or_404, require_permission
 from app.db.database import get_db
-from app.models.models import Booking, Payment, User
+from app.models.models import Invoice, Payment, PaymentStatus, User
+from app.schemas.schemas import PaymentCreate, PaymentOut
 
-router = APIRouter(prefix="/api/payments", tags=["payments"])
+router = APIRouter(prefix="/api/companies/{company_id}/events/{event_id}/payments", tags=["payments"])
 
 
-@router.post("/checkout/{booking_id}")
-def create_checkout_session(
-    booking_id: str,
-    current_user: User = Depends(get_current_user),
+@router.post("", response_model=PaymentOut)
+def record_payment(
+    company_id: str,
+    event_id: str,
+    payload: PaymentCreate,
+    user: User = Depends(require_permission("payments.create")),
     db: Session = Depends(get_db),
 ):
-    booking = db.query(Booking).filter(Booking.id == booking_id).first()
-    if not booking or booking.organizer_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Booking not found")
-    if not booking.quoted_price:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Booking has no quoted price yet")
-
-    if not settings.STRIPE_SECRET_KEY:
-        # Stripe not configured — record a stub "pending" payment so the flow can be tested locally.
-        payment = Payment(booking_id=booking.id, amount=booking.quoted_price, status="stub_pending")
-        db.add(payment)
-        db.commit()
-        return {"checkout_url": None, "note": "Stripe not configured; payment recorded as stub_pending"}
-
-    import stripe
-
-    stripe.api_key = settings.STRIPE_SECRET_KEY
-    session = stripe.checkout.Session.create(
-        mode="payment",
-        payment_method_types=["card"],
-        line_items=[
-            {
-                "price_data": {
-                    "currency": "usd",
-                    "unit_amount": int(booking.quoted_price * 100),
-                    "product_data": {"name": f"Booking deposit — {booking.package.title}"},
-                },
-                "quantity": 1,
-            }
-        ],
-        success_url=f"{settings.CLIENT_URL}/bookings/{booking.id}?paid=1",
-        cancel_url=f"{settings.CLIENT_URL}/bookings/{booking.id}?paid=0",
+    event = get_accessible_event_or_404(db, user, company_id, event_id)
+    invoice = (
+        db.query(Invoice)
+        .filter(Invoice.event_id == event.id)
+        .order_by(Invoice.created_at.desc())
+        .first()
     )
 
     payment = Payment(
-        booking_id=booking.id,
-        amount=booking.quoted_price,
-        status="pending",
-        stripe_session_id=session.id,
+        invoice_id=invoice.id if invoice else None,
+        event_id=event.id,
+        company_id=company_id,
+        amount=payload.amount,
+        type=payload.type,
+        status=PaymentStatus.paid,
+        provider=payload.method or "manual",
+        paid_at=datetime.now(timezone.utc),
     )
     db.add(payment)
+    db.flush()
+
+    apply_payment_effects(db, event)
+
+    if event.client.user_id:
+        notify(
+            db,
+            event.client.user_id,
+            type="payment_recorded",
+            title="Payment recorded",
+            body=f"₹{payment.amount:,.0f} has been recorded for {event.title}.",
+            company_id=company_id,
+            related_entity_type="event",
+            related_entity_id=event.id,
+        )
+
     db.commit()
-    return {"checkout_url": session.url}
+    db.refresh(payment)
+    return payment
 
 
-@router.post("/webhook")
-async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
-    import stripe
-
-    payload = await request.body()
-    sig_header = request.headers.get("stripe-signature")
-
-    try:
-        event = stripe.Webhook.construct_event(payload, sig_header, settings.STRIPE_WEBHOOK_SECRET)
-    except (ValueError, stripe.error.SignatureVerificationError):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid webhook signature")
-
-    if event["type"] == "checkout.session.completed":
-        session = event["data"]["object"]
-        payment = db.query(Payment).filter(Payment.stripe_session_id == session["id"]).first()
-        if payment:
-            payment.status = "paid"
-            db.commit()
-
-    return {"received": True}
-
-
-@router.get("/history")
-def payment_history(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+@router.get("", response_model=list[PaymentOut])
+def list_payments(
+    company_id: str, event_id: str, user: User = Depends(require_permission("payments.view")), db: Session = Depends(get_db)
 ):
-    payments = (
+    get_accessible_event_or_404(db, user, company_id, event_id)
+    return (
         db.query(Payment)
-        .join(Booking)
-        .filter(Booking.organizer_id == current_user.id)
+        .filter(Payment.event_id == event_id, Payment.company_id == company_id)
         .order_by(Payment.created_at.desc())
         .all()
     )
-    return [
-        {
-            "id": p.id,
-            "booking_id": p.booking_id,
-            "amount": p.amount,
-            "currency": p.currency,
-            "status": p.status,
-            "created_at": p.created_at,
-        }
-        for p in payments
-    ]

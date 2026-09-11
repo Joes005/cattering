@@ -1,112 +1,51 @@
-from datetime import datetime, timezone
-
-from sqlalchemy import or_
-
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user
+from app.core.security import get_accessible_event_or_404, require_permission
 from app.db.database import get_db
 from app.models.models import Message, User
-from app.schemas.schemas import ConversationOut, MessageCreate, MessageOut
+from app.schemas.schemas import MessageCreate, MessageOut
 
-router = APIRouter(prefix="/api/messages", tags=["messages"])
+router = APIRouter(prefix="/api/companies/{company_id}/events/{event_id}/messages", tags=["messages"])
 
 
-@router.get("/conversations", response_model=list[ConversationOut])
-def conversations(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    messages = (
-        db.query(Message)
-        .filter(or_(Message.sender_id == current_user.id, Message.receiver_id == current_user.id))
-        .order_by(Message.created_at.desc())
-        .all()
+def _to_out(message: Message) -> MessageOut:
+    return MessageOut(
+        id=message.id,
+        event_id=message.event_id,
+        sender_id=message.sender_id,
+        sender_name=message.sender.full_name if getattr(message, "sender", None) else "",
+        body=message.body,
+        attachment_url=message.attachment_url,
+        created_at=message.created_at,
     )
 
-    by_counterpart: dict[str, dict] = {}
-    for m in messages:
-        other_id = m.receiver_id if m.sender_id == current_user.id else m.sender_id
-        entry = by_counterpart.setdefault(
-            other_id,
-            {"last_message": m.body, "last_message_at": m.created_at, "unread_count": 0},
-        )
-        if m.receiver_id == current_user.id and m.read_at is None:
-            entry["unread_count"] += 1
 
-    results = []
-    for other_id, entry in by_counterpart.items():
-        other_user = db.query(User).filter(User.id == other_id).first()
-        if not other_user:
-            continue
-        results.append(
-            ConversationOut(
-                other_user_id=other_id,
-                other_user_name=other_user.name,
-                last_message=entry["last_message"],
-                last_message_at=entry["last_message_at"],
-                unread_count=entry["unread_count"],
-            )
-        )
-    results.sort(key=lambda c: c.last_message_at, reverse=True)
-    return results
+@router.get("", response_model=list[MessageOut])
+def list_messages(
+    company_id: str, event_id: str, user: User = Depends(require_permission("messages.view")), db: Session = Depends(get_db)
+):
+    get_accessible_event_or_404(db, user, company_id, event_id)
+    messages = (
+        db.query(Message)
+        .filter(Message.event_id == event_id, Message.company_id == company_id)
+        .order_by(Message.created_at)
+        .all()
+    )
+    return [_to_out(m) for m in messages]
 
 
 @router.post("", response_model=MessageOut)
 def send_message(
+    company_id: str,
+    event_id: str,
     payload: MessageCreate,
-    current_user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("messages.send")),
     db: Session = Depends(get_db),
 ):
-    message = Message(
-        sender_id=current_user.id,
-        receiver_id=payload.receiver_id,
-        booking_id=payload.booking_id,
-        body=payload.body,
-    )
+    get_accessible_event_or_404(db, user, company_id, event_id)
+    message = Message(event_id=event_id, company_id=company_id, sender_id=user.id, **payload.model_dump())
     db.add(message)
     db.commit()
     db.refresh(message)
-    return message
-
-
-@router.get("/inbox", response_model=list[MessageOut])
-def inbox(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    return (
-        db.query(Message)
-        .filter(or_(Message.sender_id == current_user.id, Message.receiver_id == current_user.id))
-        .order_by(Message.created_at.desc())
-        .all()
-    )
-
-
-@router.get("/thread/{other_user_id}", response_model=list[MessageOut])
-def thread_with_user(
-    other_user_id: str,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    thread = (
-        db.query(Message)
-        .filter(
-            or_(
-                (Message.sender_id == current_user.id) & (Message.receiver_id == other_user_id),
-                (Message.sender_id == other_user_id) & (Message.receiver_id == current_user.id),
-            )
-        )
-        .order_by(Message.created_at.asc())
-        .all()
-    )
-
-    unread_ids = [m.id for m in thread if m.receiver_id == current_user.id and m.read_at is None]
-    if unread_ids:
-        db.query(Message).filter(Message.id.in_(unread_ids)).update(
-            {"read_at": datetime.now(timezone.utc)}, synchronize_session=False
-        )
-        db.commit()
-
-    return thread
+    return _to_out(message)

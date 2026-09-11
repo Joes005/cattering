@@ -3,84 +3,86 @@ import { api } from '../api/client';
 import { useAuth } from '../context/AuthContext';
 
 export default function Account() {
-  const { user, refreshUser } = useAuth();
-  const [form, setForm] = useState({ name: user?.name || '', phone: user?.phone || '' });
-  const [passwordForm, setPasswordForm] = useState({ current_password: '', new_password: '' });
-  const [notice, setNotice] = useState('');
+  const { user, refresh } = useAuth();
+  const [form, setForm] = useState({
+    full_name: user?.full_name || '',
+    phone: user?.phone || '',
+    current_password: '',
+    new_password: '',
+  });
+  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
 
-  async function saveProfile(e) {
-    e.preventDefault();
-    setError('');
-    try {
-      await api.put('/auth/profile', form, true);
-      await refreshUser();
-      setNotice('Profile updated.');
-    } catch (err) {
-      setError(err.message);
-    }
+  function update(field, value) {
+    setForm((f) => ({ ...f, [field]: value }));
   }
 
-  async function changePassword(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
     setError('');
+    setMessage('');
+    setSaving(true);
     try {
-      await api.put('/auth/profile', passwordForm, true);
-      setPasswordForm({ current_password: '', new_password: '' });
-      setNotice('Password changed.');
+      const payload = { full_name: form.full_name, phone: form.phone };
+      if (form.new_password) {
+        payload.current_password = form.current_password;
+        payload.new_password = form.new_password;
+      }
+      await api.put('/auth/profile', payload, true);
+      await refresh();
+      setForm((f) => ({ ...f, current_password: '', new_password: '' }));
+      setMessage('Your profile has been updated.');
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Unable to update your profile');
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <div className="container section" style={{ maxWidth: 480 }}>
-      <h2>Account settings</h2>
-      {notice && <p className="muted">{notice}</p>}
-      {error && <p className="error-text">{error}</p>}
+    <div className="mx-auto max-w-lg">
+      <h2 className="mb-1 text-lg font-semibold text-neutral-900">Account settings</h2>
+      <p className="mb-6 text-sm text-neutral-500">{user?.email}</p>
 
-      <form className="card" onSubmit={saveProfile} style={{ marginBottom: 24 }}>
-        <h3>Profile</h3>
-        <div className="field">
-          <label>Email</label>
-          <input className="input" value={user?.email || ''} disabled />
-        </div>
-        <div className="field">
-          <label>Full name</label>
-          <input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-        </div>
-        <div className="field">
-          <label>Phone</label>
-          <input className="input" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
-        </div>
-        <button className="btn btn-primary" type="submit">
-          Save changes
-        </button>
-      </form>
+      <form onSubmit={handleSubmit} className="card space-y-4 p-6">
+        {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        {message && <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-700">{message}</p>}
 
-      <form className="card" onSubmit={changePassword}>
-        <h3>Change password</h3>
-        <div className="field">
-          <label>Current password</label>
+        <div>
+          <label className="label">Full name</label>
+          <input className="input" value={form.full_name} onChange={(e) => update('full_name', e.target.value)} />
+        </div>
+        <div>
+          <label className="label">Phone</label>
+          <input className="input" value={form.phone} onChange={(e) => update('phone', e.target.value)} />
+        </div>
+
+        <hr className="border-neutral-200" />
+
+        <div>
+          <label className="label">Current password</label>
           <input
-            className="input"
             type="password"
-            value={passwordForm.current_password}
-            onChange={(e) => setPasswordForm({ ...passwordForm, current_password: e.target.value })}
+            className="input"
+            value={form.current_password}
+            onChange={(e) => update('current_password', e.target.value)}
+            placeholder="Only needed if changing your password"
           />
         </div>
-        <div className="field">
-          <label>New password</label>
+        <div>
+          <label className="label">New password</label>
           <input
-            className="input"
             type="password"
             minLength={6}
-            value={passwordForm.new_password}
-            onChange={(e) => setPasswordForm({ ...passwordForm, new_password: e.target.value })}
+            className="input"
+            value={form.new_password}
+            onChange={(e) => update('new_password', e.target.value)}
           />
         </div>
-        <button className="btn btn-outline" type="submit">
-          Update password
+
+        <button type="submit" disabled={saving} className="btn-primary">
+          {saving ? 'Saving…' : 'Save changes'}
         </button>
       </form>
     </div>

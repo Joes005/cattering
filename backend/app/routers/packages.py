@@ -1,111 +1,74 @@
-from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user, require_role
+from app.core.security import get_current_user, require_permission
 from app.db.database import get_db
-from app.models.models import Package, User, VendorProfile
-from app.schemas.schemas import PackageCreate, PackageOut, PackageWithVendorOut
+from app.models.models import Company, CompanyStatus, MenuItem, Package, PackageItem, User
+from app.schemas.schemas import PackageCreate, PackageDetailOut, PackageOut
 
-router = APIRouter(prefix="/api/packages", tags=["packages"])
-
-
-@router.get("", response_model=list[PackageWithVendorOut])
-def list_packages(
-    category_id: Optional[str] = None,
-    city: Optional[str] = None,
-    max_price: Optional[float] = None,
-    guest_count: Optional[int] = None,
-    db: Session = Depends(get_db),
-):
-    query = db.query(Package).options(joinedload(Package.vendor)).join(VendorProfile).filter(
-        Package.is_active.is_(True)
-    )
-    if category_id:
-        query = query.filter(Package.category_id == category_id)
-    if city:
-        query = query.filter(VendorProfile.city.ilike(f"%{city}%"))
-    if max_price is not None:
-        query = query.filter(Package.price_per_plate <= max_price)
-    if guest_count is not None:
-        query = query.filter(Package.min_guests <= guest_count, Package.max_guests >= guest_count)
-    return query.order_by(Package.created_at.desc()).all()
+router = APIRouter(prefix="/api/companies/{company_id}/packages", tags=["packages"])
+public_router = APIRouter(prefix="/api/companies/{company_id}/public", tags=["packages"])
 
 
-@router.get("/{package_id}", response_model=PackageWithVendorOut)
-def get_package(package_id: str, db: Session = Depends(get_db)):
-    pkg = (
+def _create_package(db: Session, company_id: str, payload: PackageCreate) -> Package:
+    menu_item_ids = [i.menu_item_id for i in payload.items]
+    if menu_item_ids:
+        found = (
+            db.query(MenuItem.id)
+            .filter(MenuItem.id.in_(menu_item_ids), MenuItem.company_id == company_id)
+            .all()
+        )
+        if len(found) != len(set(menu_item_ids)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more menu items were not found")
+
+    package = Package(company_id=company_id, **payload.model_dump(exclude={"items"}))
+    db.add(package)
+    db.flush()
+    for item in payload.items:
+        db.add(PackageItem(package_id=package.id, menu_item_id=item.menu_item_id, note=item.note))
+    db.commit()
+    db.refresh(package)
+    return package
+
+
+@router.post("", response_model=PackageDetailOut, dependencies=[Depends(require_permission("menus.create"))])
+def create_package(company_id: str, payload: PackageCreate, db: Session = Depends(get_db)):
+    return _create_package(db, company_id, payload)
+
+
+@router.get("", response_model=list[PackageOut], dependencies=[Depends(require_permission("menus.view"))])
+def list_packages(company_id: str, db: Session = Depends(get_db)):
+    return db.query(Package).filter(Package.company_id == company_id).order_by(Package.name).all()
+
+
+@router.get("/{package_id}", response_model=PackageDetailOut, dependencies=[Depends(require_permission("menus.view"))])
+def get_package(company_id: str, package_id: str, db: Session = Depends(get_db)):
+    package = db.query(Package).filter(Package.id == package_id, Package.company_id == company_id).first()
+    if not package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return package
+
+
+@router.delete(
+    "/{package_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_permission("menus.delete"))]
+)
+def delete_package(company_id: str, package_id: str, db: Session = Depends(get_db)):
+    package = db.query(Package).filter(Package.id == package_id, Package.company_id == company_id).first()
+    if not package:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    db.delete(package)
+    db.commit()
+
+
+@public_router.get("/packages", response_model=list[PackageOut])
+def list_public_packages(company_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Active packages, visible to any signed-in user (clients browsing before booking)."""
+    company = db.query(Company).filter(Company.id == company_id, Company.status == CompanyStatus.active).first()
+    if not company:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return (
         db.query(Package)
-        .options(joinedload(Package.vendor))
-        .filter(Package.id == package_id)
-        .first()
+        .filter(Package.company_id == company_id, Package.is_active.is_(True))
+        .order_by(Package.price)
+        .all()
     )
-    if not pkg:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
-    return pkg
-
-
-@router.post("", response_model=PackageOut)
-def create_package(
-    payload: PackageCreate,
-    current_user: User = Depends(require_role("vendor")),
-    db: Session = Depends(get_db),
-):
-    profile = db.query(VendorProfile).filter(VendorProfile.user_id == current_user.id).first()
-    if not profile:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Create your vendor profile first")
-
-    pkg = Package(vendor_id=profile.id, **payload.model_dump())
-    db.add(pkg)
-    db.commit()
-    db.refresh(pkg)
-    return pkg
-
-
-@router.put("/{package_id}", response_model=PackageOut)
-def update_package(
-    package_id: str,
-    payload: PackageCreate,
-    current_user: User = Depends(require_role("vendor")),
-    db: Session = Depends(get_db),
-):
-    pkg = db.query(Package).join(VendorProfile).filter(Package.id == package_id).first()
-    if not pkg:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
-    if pkg.vendor.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your package")
-
-    for field, value in payload.model_dump().items():
-        setattr(pkg, field, value)
-    db.commit()
-    db.refresh(pkg)
-    return pkg
-
-
-@router.delete("/{package_id}")
-def delete_package(
-    package_id: str,
-    current_user: User = Depends(require_role("vendor")),
-    db: Session = Depends(get_db),
-):
-    pkg = db.query(Package).join(VendorProfile).filter(Package.id == package_id).first()
-    if not pkg:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Package not found")
-    if pkg.vendor.user_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your package")
-
-    db.delete(pkg)
-    db.commit()
-    return {"ok": True}
-
-
-@router.get("/mine/list", response_model=list[PackageOut])
-def my_packages(
-    current_user: User = Depends(require_role("vendor")),
-    db: Session = Depends(get_db),
-):
-    profile = db.query(VendorProfile).filter(VendorProfile.user_id == current_user.id).first()
-    if not profile:
-        return []
-    return db.query(Package).filter(Package.vendor_id == profile.id).all()

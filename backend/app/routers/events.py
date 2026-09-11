@@ -1,91 +1,121 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
-from app.core.security import get_current_user, require_role
+from app.core.event_lifecycle import is_transition_allowed
+from app.core.notify import notify
+from app.core.security import get_accessible_event_or_404, get_current_user, require_permission, scope_event_ids_for_staff
 from app.db.database import get_db
-from app.models.models import Booking, Event, User
-from app.schemas.schemas import EventCreate, EventDetailOut, EventOut
+from app.models.models import Client, Event, EventStatus, EventStatusHistory, User
+from app.schemas.schemas import EventCreate, EventDetailOut, EventOut, EventStatusUpdate, EventUpdate
 
-router = APIRouter(prefix="/api/events", tags=["events"])
+router = APIRouter(prefix="/api/companies/{company_id}/events", tags=["events"])
 
 
-@router.post("", response_model=EventOut)
+class CompanyEventCreate(EventCreate):
+    client_id: str
+
+
+@router.post("", response_model=EventOut, dependencies=[Depends(require_permission("events.create"))])
 def create_event(
-    payload: EventCreate,
-    current_user: User = Depends(require_role("organizer", "admin")),
+    company_id: str,
+    payload: CompanyEventCreate,
+    user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    event = Event(organizer_id=current_user.id, **payload.model_dump())
+    client = db.query(Client).filter(Client.id == payload.client_id, Client.company_id == company_id).first()
+    if not client:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found for this company")
+
+    data = payload.model_dump(exclude={"client_id"})
+    if not data.get("title"):
+        data["title"] = f"{payload.event_type} for {payload.guest_count} guests"
+
+    event = Event(company_id=company_id, client_id=client.id, created_by=user.id, **data)
     db.add(event)
+    db.flush()
+    db.add(EventStatusHistory(event_id=event.id, from_status=None, to_status=event.status, changed_by=user.id))
     db.commit()
     db.refresh(event)
     return event
 
 
-@router.get("/mine", response_model=list[EventOut])
-def my_events(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+@router.get("", response_model=list[EventOut])
+def list_events(
+    company_id: str, user: User = Depends(require_permission("events.view")), db: Session = Depends(get_db)
 ):
-    return (
-        db.query(Event)
-        .filter(Event.organizer_id == current_user.id)
-        .order_by(Event.event_date.desc())
-        .all()
-    )
+    query = db.query(Event).filter(Event.company_id == company_id, Event.deleted_at.is_(None))
+
+    scoped_ids = scope_event_ids_for_staff(db, user, company_id)
+    if scoped_ids is not None:
+        # A plain `staff` member only sees events they're assigned to.
+        query = query.filter(Event.id.in_(scoped_ids))
+
+    return query.order_by(Event.event_date.desc()).all()
 
 
 @router.get("/{event_id}", response_model=EventDetailOut)
 def get_event(
+    company_id: str,
     event_id: str,
-    current_user: User = Depends(get_current_user),
+    user: User = Depends(require_permission("events.view")),
     db: Session = Depends(get_db),
 ):
-    event = (
-        db.query(Event)
-        .options(joinedload(Event.bookings).joinedload(Booking.package), joinedload(Event.bookings).joinedload(Booking.vendor))
-        .filter(Event.id == event_id)
-        .first()
-    )
-    if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
-    if event.organizer_id != current_user.id and current_user.role.value != "admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your event")
-    return event
+    return get_accessible_event_or_404(db, user, company_id, event_id)
 
 
-@router.put("/{event_id}", response_model=EventOut)
+@router.patch("/{event_id}", response_model=EventOut)
 def update_event(
+    company_id: str,
     event_id: str,
-    payload: EventCreate,
-    current_user: User = Depends(get_current_user),
+    payload: EventUpdate,
+    user: User = Depends(require_permission("events.update")),
     db: Session = Depends(get_db),
 ):
-    event = db.query(Event).filter(Event.id == event_id).first()
-    if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
-    if event.organizer_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your event")
+    event = get_accessible_event_or_404(db, user, company_id, event_id)
 
-    for field, value in payload.model_dump().items():
+    for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(event, field, value)
+
     db.commit()
     db.refresh(event)
     return event
 
 
-@router.delete("/{event_id}")
-def delete_event(
+@router.post("/{event_id}/status", response_model=EventOut)
+def transition_event_status(
+    company_id: str,
     event_id: str,
-    current_user: User = Depends(get_current_user),
+    payload: EventStatusUpdate,
+    user: User = Depends(require_permission("events.update")),
     db: Session = Depends(get_db),
 ):
-    event = db.query(Event).filter(Event.id == event_id).first()
-    if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
-    if event.organizer_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your event")
+    event = get_accessible_event_or_404(db, user, company_id, event_id)
 
-    db.delete(event)
+    if not is_transition_allowed(event.status, payload.status):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot move this event from '{event.status.value}' to '{payload.status.value}'.",
+        )
+
+    db.add(
+        EventStatusHistory(
+            event_id=event.id, from_status=event.status, to_status=payload.status, changed_by=user.id, note=payload.note
+        )
+    )
+    event.status = payload.status
+
+    if payload.status == EventStatus.completed and event.client.user_id:
+        notify(
+            db,
+            event.client.user_id,
+            type="event_completed",
+            title="Hope your event went great!",
+            body=f"{event.title} is complete — we'd love your feedback.",
+            company_id=company_id,
+            related_entity_type="event",
+            related_entity_id=event.id,
+        )
+
     db.commit()
-    return {"ok": True}
+    db.refresh(event)
+    return event
