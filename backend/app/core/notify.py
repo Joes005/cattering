@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
 
-from app.models.models import CompanyMember, EmploymentRole, MemberStatus, Notification
+from app.models.models import Company, Notification
 
 
 def notify(
@@ -35,14 +35,6 @@ def notify_company_managers(
     related_entity_type: str | None = None,
     related_entity_id: str | None = None,
 ) -> None:
-    managers = (
-        db.query(CompanyMember)
-        .filter(
-            CompanyMember.company_id == company_id,
-            CompanyMember.employment_role.in_([EmploymentRole.owner, EmploymentRole.manager]),
-            CompanyMember.status == MemberStatus.active,
-        )
-        .all()
-    )
-    for member in managers:
-        notify(db, member.user_id, type, title, body, company_id, related_entity_type, related_entity_id)
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if company and company.owner_id:
+        notify(db, company.owner_id, type, title, body, company_id, related_entity_type, related_entity_id)

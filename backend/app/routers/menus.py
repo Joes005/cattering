@@ -40,7 +40,7 @@ def create_menu_item(company_id: str, payload: MenuItemCreate, db: Session = Dep
         if not category:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Menu category not found")
 
-    item = MenuItem(company_id=company_id, **payload.model_dump())
+    item = MenuItem(company_id=company_id, **payload.model_dump(exclude={"unit_price"}))
     db.add(item)
     db.commit()
     db.refresh(item)

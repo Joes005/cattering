@@ -76,7 +76,7 @@ export default function CompanyEventDetail() {
         <div className="flex items-start justify-between">
           <div>
             <h2 className="text-xl font-semibold text-neutral-900">{event.title}</h2>
-            <p className="text-sm text-neutral-500">{event.client.name}</p>
+            <p className="text-sm text-neutral-500">{event.customer?.name || event.client?.name || 'Customer'}</p>
           </div>
           <StatusBadge status={event.status} />
         </div>
@@ -323,102 +323,50 @@ function QuotationsSection({ eventId, guestCount }) {
   );
 }
 
-const EVENT_ROLES = ['event_manager', 'chef', 'kitchen', 'service', 'delivery', 'setup', 'cleanup'];
-
 function StaffSection({ eventId }) {
-  const { currentCompanyId, hasPermission } = useAuth();
-  const queryClient = useQueryClient();
-  const [companyMemberId, setCompanyMemberId] = useState('');
-  const [eventRole, setEventRole] = useState('service');
-  const [error, setError] = useState('');
-
-  const canAssign = hasPermission('events.assign');
+  const { currentCompanyId } = useAuth();
 
   const { data: assignments, isLoading } = useQuery({
-    queryKey: ['event-staff', currentCompanyId, eventId],
+    queryKey: ['event-assignments', currentCompanyId, eventId],
     queryFn: () => staffApi.list(currentCompanyId, eventId),
     enabled: !!currentCompanyId,
-  });
-  const { data: members } = useQuery({
-    queryKey: ['members', currentCompanyId],
-    queryFn: () => membersApi.list(currentCompanyId),
-    enabled: !!currentCompanyId && canAssign,
-  });
-
-  const assignMutation = useMutation({
-    mutationFn: () => staffApi.assign(currentCompanyId, eventId, { company_member_id: companyMemberId, event_role: eventRole }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['event-staff', currentCompanyId, eventId] });
-      setCompanyMemberId('');
-      setError('');
-    },
-    onError: (err) => setError(err.message),
-  });
-
-  const removeMutation = useMutation({
-    mutationFn: (assignmentId) => staffApi.remove(currentCompanyId, eventId, assignmentId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['event-staff', currentCompanyId, eventId] }),
   });
 
   return (
     <div className="card p-6">
-      <h3 className="mb-4 text-sm font-semibold text-neutral-900">Staff assignment</h3>
-
-      {canAssign && (
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            assignMutation.mutate();
-          }}
-          className="mb-4 flex flex-wrap items-end gap-2 rounded-lg border border-neutral-200 p-4"
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-neutral-900">Workforce & Event Staff</h3>
+          <p className="text-xs text-neutral-500">Confirmed workforce assignments for this catering event</p>
+        </div>
+        <Link
+          to="/employer/workforce"
+          className="rounded-lg bg-brand-50 border border-brand-200 px-3 py-1.5 text-xs font-semibold text-brand-700 hover:bg-brand-100 transition"
         >
-          {error && <p className="w-full rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-          <div className="min-w-[180px] flex-1">
-            <label className="label">Employee</label>
-            <select required className="input" value={companyMemberId} onChange={(e) => setCompanyMemberId(e.target.value)}>
-              <option value="">Select…</option>
-              {(members || []).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.user.full_name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="min-w-[140px]">
-            <label className="label">Role</label>
-            <select className="input" value={eventRole} onChange={(e) => setEventRole(e.target.value)}>
-              {EVENT_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {humanize(r)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <button type="submit" disabled={assignMutation.isPending} className="btn-primary">
-            {assignMutation.isPending ? 'Assigning…' : 'Assign'}
-          </button>
-        </form>
-      )}
+          + Hire Staff in Marketplace
+        </Link>
+      </div>
 
       {isLoading ? (
         <SkeletonRows rows={2} />
-      ) : assignments.length === 0 ? (
-        <EmptyState title="No staff assigned yet" description="Assign employees to this event." />
+      ) : !assignments || assignments.length === 0 ? (
+        <EmptyState
+          title="No staff assigned yet"
+          description="Post a shift in the Workforce Marketplace to recruit waiters, chefs, and bartenders for this event."
+        />
       ) : (
         <div className="divide-y divide-neutral-100">
           {assignments.map((a) => (
             <div key={a.id} className="flex items-center justify-between py-3 text-sm">
               <div>
-                <p className="font-medium text-neutral-900">{a.member_name}</p>
-                <p className="text-xs text-neutral-500">{humanize(a.event_role)}</p>
+                <p className="font-semibold text-neutral-900">{a.employee?.full_name}</p>
+                <p className="text-xs text-neutral-500">
+                  Role: {a.role} · Agreed: ₹{a.agreed_pay_rate}/hr
+                  {a.employee?.phone && ` · 📞 ${a.employee.phone}`}
+                </p>
               </div>
               <div className="flex items-center gap-2">
                 <StatusBadge status={a.status} />
-                {canAssign && (
-                  <button className="text-xs text-red-600 hover:underline" onClick={() => removeMutation.mutate(a.id)}>
-                    Remove
-                  </button>
-                )}
               </div>
             </div>
           ))}
@@ -444,14 +392,20 @@ function TasksSection({ eventId }) {
     queryFn: () => tasksApi.list(currentCompanyId, eventId),
     enabled: !!currentCompanyId,
   });
-  const { data: members } = useQuery({
-    queryKey: ['members', currentCompanyId],
-    queryFn: () => membersApi.list(currentCompanyId),
-    enabled: !!currentCompanyId && canEdit,
+
+  const { data: assignments } = useQuery({
+    queryKey: ['event-assignments', currentCompanyId, eventId],
+    queryFn: () => staffApi.list(currentCompanyId, eventId),
+    enabled: !!currentCompanyId,
   });
 
   const createMutation = useMutation({
-    mutationFn: () => tasksApi.create(currentCompanyId, eventId, { title, phase, assigned_to: assignedTo || null }),
+    mutationFn: () =>
+      tasksApi.create(currentCompanyId, eventId, {
+        title,
+        phase,
+        assigned_to_user_id: assignedTo || null,
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['event-tasks', currentCompanyId, eventId] });
       setTitle('');
@@ -463,7 +417,10 @@ function TasksSection({ eventId }) {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['event-tasks', currentCompanyId, eventId] }),
   });
 
-  const memberName = (id) => members?.find((m) => m.id === id)?.user.full_name;
+  const memberName = (userId) => {
+    const asgn = (assignments || []).find((a) => a.employee_id === userId);
+    return asgn?.employee?.full_name || 'Assigned Staff';
+  };
 
   return (
     <div className="card p-6">
@@ -495,9 +452,9 @@ function TasksSection({ eventId }) {
             <label className="label">Assign to</label>
             <select className="input" value={assignedTo} onChange={(e) => setAssignedTo(e.target.value)}>
               <option value="">Unassigned</option>
-              {(members || []).map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.user.full_name}
+              {(assignments || []).map((asgn) => (
+                <option key={asgn.employee_id} value={asgn.employee_id}>
+                  {asgn.employee?.full_name} ({asgn.role})
                 </option>
               ))}
             </select>
@@ -525,7 +482,11 @@ function TasksSection({ eventId }) {
               />
               <span className={t.status === 'done' ? 'text-neutral-400 line-through' : 'text-neutral-800'}>{t.title}</span>
               <span className="text-xs text-neutral-400">{humanize(t.phase)}</span>
-              {t.assigned_to && <span className="ml-auto text-xs text-neutral-500">{memberName(t.assigned_to)}</span>}
+              {(t.assigned_to_user_id || t.assigned_to) && (
+                <span className="ml-auto text-xs text-neutral-500">
+                  {memberName(t.assigned_to_user_id || t.assigned_to)}
+                </span>
+              )}
             </label>
           ))}
         </div>

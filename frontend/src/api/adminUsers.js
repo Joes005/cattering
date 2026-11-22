@@ -1,7 +1,3 @@
-import { api } from './client';
+import { adminApi, adminUsersApi } from './adminApi';
 
-export const adminUsersApi = {
-  list: () => api.get('/users', true),
-  suspend: (userId) => api.post(`/users/${userId}/suspend`, undefined, true),
-  activate: (userId) => api.post(`/users/${userId}/activate`, undefined, true),
-};
+export { adminApi, adminUsersApi };

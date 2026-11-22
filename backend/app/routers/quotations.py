@@ -179,10 +179,11 @@ def send_quotation(
             db.add(EventStatusHistory(event_id=event.id, from_status=event.status, to_status=next_status))
             event.status = next_status
 
-    if event.client.user_id:
+    customer_user_id = getattr(getattr(event, "customer", None), "user_id", None)
+    if customer_user_id:
         notify(
             db,
-            event.client.user_id,
+            customer_user_id,
             type="quotation_sent",
             title="Your quotation is ready",
             body=f"A quotation for {event.title} (₹{quotation.total:,.0f}) is ready for your review.",

@@ -1,31 +1,43 @@
 import { Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-
-function roleHome(role) {
-  if (role === 'admin') return '/admin';
-  if (role === 'company_user') return '/company';
-  return '/client';
-}
+import { roleHome } from '../router/guards';
 
 const FEATURES = [
   {
-    icon: '🎉',
-    title: 'For clients',
-    description: 'Book an event in minutes, review a clear quotation, pay securely, and track everything from one page.',
+    icon: '🏢',
+    title: 'For Catering Employers',
+    description:
+      'Manage customers, itemized quotations, event schedules, menus, inventory, and hire verified staff directly from the marketplace.',
+    link: '/register/employer',
+    linkText: 'Register your business →',
   },
   {
-    icon: '🍽️',
-    title: 'For catering companies',
-    description: 'Run enquiries, quotations, staffing, inventory, invoicing and reports without switching tools.',
+    icon: '🧑‍🍳',
+    title: 'For Catering Workforce',
+    description:
+      'Browse catering shifts across multiple employers, apply instantly, check in digitally, and receive verified earnings on time.',
+    link: '/register/employee',
+    linkText: 'Join the workforce →',
   },
   {
-    icon: '📋',
-    title: 'For your team',
-    description: "A mobile-friendly view of today's assignments, tasks, and check-in — nothing they don't need.",
+    icon: '✨',
+    title: 'For Event Customers',
+    description:
+      'Browse verified catering teams, request customized menus, review transparent itemized quotations, and pay milestones securely.',
+    link: '/register/customer',
+    linkText: 'Book a caterer →',
+  },
+  {
+    icon: '🛡️',
+    title: 'Platform Administration',
+    description:
+      'Full multi-tenant governance, employer verification & approval, workforce oversight, platform events, and audit logging.',
+    link: '/admin',
+    linkText: 'Admin portal →',
   },
 ];
 
-const STEPS = ['Enquiry', 'Quotation', 'Approval', 'Advance paid', 'Confirmed', 'Delivered'];
+const STEPS = ['Customer Enquiry', 'Itemized Quotation', 'Staff Marketplace Hiring', 'Event Execution', 'Digital Attendance', 'Invoice & Payouts'];
 
 export default function Home() {
   const { user } = useAuth();
@@ -41,16 +53,16 @@ export default function Home() {
             <span className="text-base font-semibold tracking-tight text-neutral-900">Plated</span>
           </div>
           {user ? (
-            <Link to={roleHome(user.global_role)} className="btn-primary">
-              Go to dashboard
+            <Link to={roleHome(user.role || user.global_role)} className="btn-primary">
+              Go to Dashboard
             </Link>
           ) : (
             <div className="flex items-center gap-3">
               <Link to="/login" className="btn-secondary">
                 Log in
               </Link>
-              <Link to="/signup" className="btn-primary">
-                Book an event
+              <Link to="/register/employer" className="btn-primary">
+                Register Business
               </Link>
             </div>
           )}
@@ -70,45 +82,51 @@ export default function Home() {
           />
 
           <div className="relative mx-auto max-w-3xl px-4 py-24 text-center sm:py-28">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3 py-1 text-xs font-medium text-brand-700 shadow-soft">
-              <span className="h-1.5 w-1.5 rounded-full bg-brand-500" />
-              Catering event management
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-brand-200 bg-white px-3.5 py-1 text-xs font-semibold text-brand-700 shadow-soft">
+              <span className="h-2 w-2 rounded-full bg-brand-500 animate-pulse" />
+              Multi-Tenant Catering OS & Workforce Marketplace
             </span>
             <h1 className="mt-5 text-4xl font-bold leading-[1.1] tracking-tight text-neutral-900 sm:text-6xl">
-              Run every catered event
+              Catering business operations &
               <br />
-              <span className="bg-brand-gradient bg-clip-text text-transparent">enquiry to invoice.</span>
+              <span className="bg-brand-gradient bg-clip-text text-transparent">workforce marketplace.</span>
             </h1>
-            <p className="mx-auto mt-5 max-w-xl text-lg text-neutral-500">
-              Plated connects clients, catering companies, and their staff through one clear booking,
-              staffing, and billing workflow.
+            <p className="mx-auto mt-5 max-w-2xl text-lg text-neutral-600">
+              One unified platform built strictly for Catering Businesses, Independent Catering Staff, Event Customers, and Platform Administrators.
             </p>
-            <div className="mt-9 flex items-center justify-center gap-3">
-              <Link to="/signup" className="btn-primary px-6 py-3 text-base">
-                Book an event
+            <div className="mt-8 flex flex-wrap items-center justify-center gap-4">
+              <Link to="/register/employer" className="btn-primary px-6 py-3 text-base shadow-glow">
+                Register as Catering Employer
               </Link>
-              <Link to="/login" className="btn-secondary px-6 py-3 text-base">
-                Log in
+              <Link to="/register/employee" className="btn-secondary px-6 py-3 text-base border-emerald-300 text-emerald-800 hover:bg-emerald-50">
+                Join as Catering Workforce
+              </Link>
+              <Link to="/register/customer" className="btn-secondary px-6 py-3 text-base border-indigo-300 text-indigo-800 hover:bg-indigo-50">
+                Book Catering as Customer
+              </Link>
+              <Link to="/login" className="rounded-xl px-5 py-3 text-sm font-medium text-neutral-600 hover:text-neutral-900">
+                Sign In →
               </Link>
             </div>
-            <p className="mt-5 text-sm text-neutral-500">
-              Running a catering business?{' '}
-              <Link to="/signup/company" className="font-medium text-brand-700 hover:underline">
-                Register your company →
-              </Link>
-            </p>
           </div>
         </section>
 
-        <section className="mx-auto max-w-5xl px-4 pb-8">
-          <div className="grid gap-5 sm:grid-cols-3">
+        <section className="mx-auto max-w-6xl px-4 pb-12">
+          <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
             {FEATURES.map((f) => (
-              <div key={f.title} className="card p-6">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 text-xl">
-                  {f.icon}
+              <div key={f.title} className="card p-6 flex flex-col justify-between hover:shadow-card-hover transition">
+                <div>
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-brand-50 to-brand-100 text-2xl">
+                    {f.icon}
+                  </div>
+                  <h3 className="mt-4 text-base font-semibold text-neutral-900">{f.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-neutral-500">{f.description}</p>
                 </div>
-                <h3 className="mt-4 text-base font-semibold text-neutral-900">{f.title}</h3>
-                <p className="mt-1.5 text-sm leading-relaxed text-neutral-500">{f.description}</p>
+                <div className="mt-6 pt-4 border-t border-neutral-100">
+                  <Link to={f.link} className="text-xs font-semibold text-brand-700 hover:underline">
+                    {f.linkText}
+                  </Link>
+                </div>
               </div>
             ))}
           </div>
@@ -116,8 +134,10 @@ export default function Home() {
 
         <section className="mx-auto max-w-5xl px-4 py-16">
           <div className="card overflow-x-auto p-6 sm:p-8">
-            <p className="mb-6 text-sm font-medium text-neutral-500">The lifecycle, start to finish</p>
-            <div className="flex min-w-[560px] items-center">
+            <p className="mb-6 text-sm font-semibold uppercase tracking-wider text-neutral-500">
+              The Complete Catering & Staffing Lifecycle
+            </p>
+            <div className="flex min-w-[620px] items-center">
               {STEPS.map((step, i) => (
                 <div key={step} className="flex flex-1 items-center last:flex-none">
                   <div className="flex flex-col items-center gap-2 text-center">
@@ -128,7 +148,7 @@ export default function Home() {
                     >
                       {i + 1}
                     </div>
-                    <span className="whitespace-nowrap text-xs font-medium text-neutral-600">{step}</span>
+                    <span className="whitespace-nowrap text-xs font-medium text-neutral-700">{step}</span>
                   </div>
                   {i < STEPS.length - 1 && <div className="mx-2 h-px flex-1 bg-neutral-200" />}
                 </div>
@@ -139,7 +159,7 @@ export default function Home() {
       </main>
 
       <footer className="border-t border-neutral-200/70 py-8 text-center text-sm text-neutral-400">
-        Plated — catering event management, done properly.
+        Plated — Multi-Tenant Catering Business Management & Workforce Marketplace.
       </footer>
     </div>
   );

@@ -13,5 +13,15 @@ backend/uploads/
 node_modules/
 frontend/dist/
 
+# Database dumps & temp backups
+*.dump
+*.sql
+*.sqlite3
+
+# Python test caches & bytecode
+.pytest_cache/
+*.pyc
+backend/.pytest_cache/
+
 # OS / editor
 .DS_Store

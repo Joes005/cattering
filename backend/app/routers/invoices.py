@@ -47,6 +47,46 @@ def _to_detail_out(db: Session, invoice: Invoice) -> InvoiceDetailOut:
 
 
 @router.post(
+    "", response_model=InvoiceDetailOut, status_code=status.HTTP_201_CREATED,
+)
+def create_invoice(
+    company_id: str,
+    event_id: str,
+    payload: InvoiceCreate,
+    user: User = Depends(require_permission("invoices.create")),
+    db: Session = Depends(get_db),
+):
+    event = get_accessible_event_or_404(db, user, company_id, event_id)
+    inv_number = payload.invoice_number or _generate_invoice_number()
+    invoice = Invoice(
+        event_id=event.id,
+        company_id=company_id,
+        invoice_number=inv_number,
+        subtotal=payload.subtotal if payload.subtotal else payload.total,
+        tax=payload.tax or 0.0,
+        discount=payload.discount or 0.0,
+        total=payload.total,
+        due_date=payload.due_date,
+    )
+    db.add(invoice)
+    db.flush()
+
+    for item in payload.items:
+        db.add(
+            InvoiceItem(
+                invoice_id=invoice.id,
+                description=item.description,
+                quantity=item.quantity,
+                rate=item.rate,
+                amount=item.rate * item.quantity,
+            )
+        )
+    db.commit()
+    db.refresh(invoice)
+    return _to_detail_out(db, invoice)
+
+
+@router.post(
     "/from-quotation/{quotation_id}", response_model=InvoiceDetailOut,
 )
 def create_invoice_from_quotation(

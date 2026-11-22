@@ -44,10 +44,11 @@ def record_payment(
 
     apply_payment_effects(db, event)
 
-    if event.client.user_id:
+    customer_user_id = getattr(getattr(event, "customer", None), "user_id", None)
+    if customer_user_id:
         notify(
             db,
-            event.client.user_id,
+            customer_user_id,
             type="payment_recorded",
             title="Payment recorded",
             body=f"₹{payment.amount:,.0f} has been recorded for {event.title}.",

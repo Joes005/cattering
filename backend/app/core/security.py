@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Path, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -7,17 +8,8 @@ from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.permissions import CLIENT_PERMISSIONS, DEFAULT_ROLE_PERMISSIONS, PERMISSION_KEYS
 from app.db.database import get_db
-from app.models.models import (
-    CompanyMember,
-    GlobalRole,
-    MemberPermissionOverride,
-    MemberStatus,
-    PermissionEffect,
-    User,
-    UserStatus,
-)
+from app.models.models import Company, CompanyStatus, CustomerProfile, EmployeeProfile, User, UserRole, UserStatus
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -31,9 +23,15 @@ def verify_password(password: str, password_hash: str) -> bool:
     return pwd_context.verify(password, password_hash)
 
 
-def create_access_token(user: User) -> str:
+def create_access_token(user: User, company_id: str | None = None) -> str:
     expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRES_MINUTES)
-    payload = {"sub": user.id, "role": user.global_role.value, "exp": expire}
+    payload = {
+        "sub": user.id,
+        "role": user.role.value,
+        "company_id": company_id,
+        "status": user.status.value,
+        "exp": expire,
+    }
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 
@@ -49,158 +47,140 @@ def get_current_user(
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired token")
 
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user or user.status != UserStatus.active:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found or suspended")
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    if user.status != UserStatus.active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is suspended or inactive")
     return user
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:
-    if user.global_role != GlobalRole.admin:
+    if user.role != UserRole.admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user
 
 
-def require_client(user: User = Depends(get_current_user)) -> User:
-    if user.global_role != GlobalRole.client:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Client access required")
-    return user
+def require_employer(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> tuple[User, Company]:
+    if user.role != UserRole.employer:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Employer access required")
 
-
-# ── RBAC core ────────────────────────────────────────────────────────────
-# Every company-owned resource must be authorized through the two helpers
-# below (get_membership + effective_permissions / check_permission, plus
-# ensure_company_scope or ensure_client_owns). This is the one place that
-# implements "user + role + permission + tenant + resource ownership" so
-# routers never re-implement authorization ad hoc.
-
-def get_membership(db: Session, user: User, company_id: str) -> CompanyMember | None:
-    if user.global_role != GlobalRole.company_user:
-        return None
-    return (
-        db.query(CompanyMember)
-        .filter(
-            CompanyMember.user_id == user.id,
-            CompanyMember.company_id == company_id,
-            CompanyMember.status == MemberStatus.active,
+    company = db.query(Company).filter(Company.owner_id == user.id).first()
+    if not company:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No catering business associated with this employer account.",
         )
-        .first()
-    )
-
-
-def effective_permissions(db: Session, user: User, company_id: str | None = None) -> set[str]:
-    if user.global_role == GlobalRole.admin:
-        return set(PERMISSION_KEYS)
-    if user.global_role == GlobalRole.client:
-        return set(CLIENT_PERMISSIONS)
-
-    if not company_id:
-        return set()
-    member = get_membership(db, user, company_id)
-    if not member:
-        return set()
-
-    granted = set(DEFAULT_ROLE_PERMISSIONS.get(member.employment_role, set()))
-    overrides = db.query(MemberPermissionOverride).filter(
-        MemberPermissionOverride.company_member_id == member.id
-    )
-    for override in overrides.all():
-        key = override.permission.key
-        if override.effect == PermissionEffect.grant:
-            granted.add(key)
-        else:
-            granted.discard(key)
-    return granted
-
-
-def check_permission(db: Session, user: User, company_id: str | None, key: str) -> None:
-    if key not in effective_permissions(db, user, company_id):
+    if company.status == CompanyStatus.pending_approval:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"You do not have permission to perform '{key}'.",
+            detail="Your catering company registration is pending Admin review and approval.",
         )
+    if company.status == CompanyStatus.rejected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Your registration was rejected: {company.rejection_reason or 'Contact support'}.",
+        )
+    if company.status != CompanyStatus.approved:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Your catering company account is not currently active.",
+        )
+    return user, company
 
 
-def require_permission(key: str):
-    """FastAPI dependency for routes shaped as /companies/{company_id}/... """
+def require_employee(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> tuple[User, EmployeeProfile]:
+    if user.role != UserRole.employee:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Employee access required")
 
+    profile = db.query(EmployeeProfile).filter(EmployeeProfile.user_id == user.id).first()
+    if not profile:
+        profile = EmployeeProfile(user_id=user.id, location="Chennai, Tamil Nadu")
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+    return user, profile
+
+
+def require_customer(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> tuple[User, CustomerProfile]:
+    if user.role != UserRole.customer and user.role != UserRole.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Customer access required")
+
+    profile = db.query(CustomerProfile).filter(CustomerProfile.user_id == user.id).first()
+    if not profile:
+        profile = CustomerProfile(user_id=user.id, city="Chennai")
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+    return user, profile
+
+
+def ensure_company_scope(user: User, company_id_of_resource: str, company: Company | None, db: Session | None = None) -> None:
+    """Guarantees strict tenant isolation across multiple catering businesses.
+    Returns 404 to avoid tenant leaking.
+    """
+    if user.role == UserRole.admin:
+        return
+    if user.role != UserRole.employer:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+    if company and company.id == company_id_of_resource and company.owner_id == user.id:
+        return
+
+    # Check if the employer owns this resource's company
+    from app.db.database import SessionLocal
+    local_db = db or SessionLocal()
+    try:
+        match = local_db.query(Company).filter(Company.id == company_id_of_resource, Company.owner_id == user.id).first()
+        if match:
+            if match.status == CompanyStatus.pending_approval:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your catering company registration is pending Admin review and approval.",
+                )
+            if match.status != CompanyStatus.approved:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Your catering company account is not currently active.",
+                )
+            return
+    finally:
+        if not db:
+            local_db.close()
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found")
+
+
+def require_permission(key: str = ""):
+    """FastAPI dependency for company-scoped routes (/api/companies/{company_id}/...).
+    Validates that the caller is an active approved Employer owning company_id or an Admin.
+    """
     def dependency(
         company_id: str = Path(...),
-        user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
+        auth: tuple = Depends(require_employer),
     ) -> User:
-        check_permission(db, user, company_id, key)
+        user, company = auth
+        ensure_company_scope(user, company_id, company)
         return user
-
     return dependency
 
 
-def ensure_company_scope(user: User, company_id_of_resource: str, member: CompanyMember | None) -> None:
-    """404s (not 403) when a company_user's resource belongs to another tenant."""
-    if user.global_role == GlobalRole.admin:
-        return
-    if user.global_role != GlobalRole.company_user or not member or member.company_id != company_id_of_resource:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-
-
-def ensure_client_owns(db: Session, user: User, client_id: str) -> None:
-    from app.models.models import Client
-
-    if user.global_role == GlobalRole.admin:
-        return
-    client = db.query(Client).filter(Client.id == client_id).first()
-    if not client or client.user_id != user.id:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-
-
-# ── Event-level scoping ──────────────────────────────────────────────────
-# Per spec: "Employee should only see events they are assigned to unless
-# they have additional permissions" — owner/manager (and admin) see every
-# event in the company; a plain `staff` member only sees events they're
-# assigned to via EventStaff. This is enforced here once and reused by
-# every router that hangs off /companies/{company_id}/events/{event_id}/...
-# (events, quotations, staff assignment, tasks, attendance) instead of each
-# reimplementing the same scoping check.
-
-def _staff_member_or_none(db: Session, user: User, company_id: str) -> CompanyMember | None:
-    from app.models.models import EmploymentRole
-
-    member = get_membership(db, user, company_id)
-    if member and member.employment_role == EmploymentRole.staff:
-        return member
-    return None
-
-
-def scope_event_ids_for_staff(db: Session, user: User, company_id: str) -> list[str] | None:
-    """None means "no extra scoping" (owner/manager/admin); otherwise the list
-    of event ids a staff member is allowed to see (possibly empty)."""
-    from app.models.models import EventStaff
-
-    member = _staff_member_or_none(db, user, company_id)
-    if not member:
-        return None
-    rows = db.query(EventStaff.event_id).filter(EventStaff.company_member_id == member.id).all()
-    return [r[0] for r in rows]
-
-
 def get_accessible_event_or_404(db: Session, user: User, company_id: str, event_id: str):
-    from app.models.models import Event, EventStaff
-
+    from app.models.models import Event
     event = (
         db.query(Event)
         .filter(Event.id == event_id, Event.company_id == company_id, Event.deleted_at.is_(None))
         .first()
     )
     if not event:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
-
-    member = _staff_member_or_none(db, user, company_id)
-    if member:
-        assigned = (
-            db.query(EventStaff)
-            .filter(EventStaff.event_id == event_id, EventStaff.company_member_id == member.id)
-            .first()
-        )
-        if not assigned:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Event not found")
     return event
+

@@ -21,7 +21,7 @@ def _create_package(db: Session, company_id: str, payload: PackageCreate) -> Pac
         if len(found) != len(set(menu_item_ids)):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="One or more menu items were not found")
 
-    package = Package(company_id=company_id, **payload.model_dump(exclude={"items"}))
+    package = Package(company_id=company_id, **payload.model_dump(exclude={"items", "item_ids", "base_price"}))
     db.add(package)
     db.flush()
     for item in payload.items:

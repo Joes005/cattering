@@ -1,48 +1,39 @@
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { clientsApi } from '../../api/clients';
-import { membersApi } from '../../api/members';
+import { useQuery } from '@tanstack/react-query';
 import { eventsApi } from '../../api/events';
-import { meWorkApi } from '../../api/meWork';
+import { customersApi } from '../../api/customers';
+import { employerMarketplaceApi } from '../../api/employerMarketplaceApi';
+import { useAuth } from '../../context/AuthContext';
 import KPICard from '../../components/KPICard';
 import EmptyState from '../../components/EmptyState';
 import StatusBadge from '../../components/StatusBadge';
-import { SkeletonCard, SkeletonRows } from '../../components/Skeleton';
-import { useAuth } from '../../context/AuthContext';
-
-const OPEN_STATUSES = new Set(['enquiry', 'quotation_sent', 'awaiting_approval', 'advance_pending']);
+import { SkeletonCard } from '../../components/Skeleton';
 
 export default function CompanyDashboard() {
-  const { currentCompanyId, currentMembership, hasPermission, user } = useAuth();
+  const { currentCompanyId, company, user } = useAuth();
 
-  // Owner/manager get the business-overview dashboard; plain staff get their
-  // personal "My Work" view — deciding this by employment_role (not by
-  // events.view) matters because staff also legitimately hold events.view
-  // (scoped server-side to their own assignments), so checking that
-  // permission here would put them on the wrong dashboard.
-  const isManager = ['owner', 'manager'].includes(currentMembership?.employment_role);
-
-  const clientsQuery = useQuery({
-    queryKey: ['clients', currentCompanyId],
-    queryFn: () => clientsApi.list(currentCompanyId),
-    enabled: !!currentCompanyId && isManager && hasPermission('clients.view'),
-  });
-  const membersQuery = useQuery({
-    queryKey: ['members', currentCompanyId],
-    queryFn: () => membersApi.list(currentCompanyId),
-    enabled: !!currentCompanyId && isManager && hasPermission('employees.view'),
-  });
   const eventsQuery = useQuery({
     queryKey: ['events', currentCompanyId],
     queryFn: () => eventsApi.listForCompany(currentCompanyId),
-    enabled: !!currentCompanyId && isManager && hasPermission('events.view'),
+    enabled: !!currentCompanyId,
   });
 
-  if (!isManager) {
-    return <MyWorkView user={user} membership={currentMembership} />;
-  }
+  const customersQuery = useQuery({
+    queryKey: ['customers', currentCompanyId],
+    queryFn: () => customersApi.list(currentCompanyId),
+    enabled: !!currentCompanyId,
+  });
 
-  if (clientsQuery.isLoading || membersQuery.isLoading || eventsQuery.isLoading) {
+  const assignmentsQuery = useQuery({
+    queryKey: ['assignments', currentCompanyId],
+    queryFn: () => employerMarketplaceApi.listAssignments(currentCompanyId),
+    enabled: !!currentCompanyId,
+  });
+
+  const isPending = company?.status === 'pending_approval';
+  const isSuspended = company?.status === 'suspended';
+
+  if (eventsQuery.isLoading || customersQuery.isLoading) {
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
@@ -52,138 +43,105 @@ export default function CompanyDashboard() {
     );
   }
 
-  const clients = clientsQuery.data || [];
-  const members = membersQuery.data || [];
   const events = eventsQuery.data || [];
-  const openEvents = events.filter((e) => OPEN_STATUSES.has(e.status));
+  const customers = customersQuery.data || [];
+  const assignments = assignmentsQuery.data || [];
+  const upcomingEvents = events.filter((e) => ['inquiry', 'quoted', 'confirmed'].includes(e.status));
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KPICard label="Clients" value={clients.length} icon="🎉" tone="brand" />
-        <KPICard label="Employees" value={members.length} icon="🧑‍🍳" />
-        <KPICard label="Total events" value={events.length} icon="📅" />
-        <KPICard label="In the pipeline" value={openEvents.length} hint="Enquiry → advance pending" icon="📝" />
-      </div>
-
-      {events.length === 0 ? (
-        <EmptyState icon="🎉" title="No events yet" description="Events your clients book will show up here." />
-      ) : (
-        <div className="card divide-y divide-neutral-100">
-          {events.slice(0, 6).map((event) => (
-            <Link
-              key={event.id}
-              to={`/company/events/${event.id}`}
-              className="flex items-center justify-between p-4 hover:bg-neutral-50"
-            >
-              <div>
-                <p className="text-sm font-medium text-neutral-900">{event.title}</p>
-                <p className="text-xs text-neutral-500">{new Date(event.event_date).toLocaleDateString()}</p>
-              </div>
-              <StatusBadge status={event.status} />
-            </Link>
-          ))}
+      {/* Account Status Alerts */}
+      {isPending && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-5 text-amber-900 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">⏳</span>
+            <div>
+              <h3 className="font-semibold text-base">Registration Pending Admin Approval</h3>
+              <p className="mt-1 text-sm text-amber-800 leading-relaxed">
+                Welcome to Plated! Your catering business profile for <strong>{company?.name}</strong> has been created
+                and is awaiting verification by platform administrators. Once approved, all operational features including
+                marketplace hiring and quotation publishing will be fully activated.
+              </p>
+            </div>
+          </div>
         </div>
       )}
-    </div>
-  );
-}
 
-function MyWorkView({ user, membership }) {
-  const queryClient = useQueryClient();
-  const { data: assignments, isLoading: loadingAssignments } = useQuery({
-    queryKey: ['me', 'assignments'],
-    queryFn: meWorkApi.listAssignments,
-  });
-  const { data: tasks, isLoading: loadingTasks } = useQuery({ queryKey: ['me', 'tasks'], queryFn: meWorkApi.listTasks });
+      {isSuspended && (
+        <div className="rounded-2xl border border-red-300 bg-red-50 p-5 text-red-900 shadow-sm">
+          <div className="flex items-start gap-3">
+            <span className="text-2xl">⚠️</span>
+            <div>
+              <h3 className="font-semibold text-base">Company Account Suspended</h3>
+              <p className="mt-1 text-sm text-red-800 leading-relaxed">
+                Your catering business account has been suspended by platform administration. Please reach out to support.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
-  const checkInMutation = useMutation({
-    mutationFn: (eventId) => meWorkApi.checkIn(eventId),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['me', 'assignments'] }),
-  });
-  const checkOutMutation = useMutation({
-    mutationFn: (eventId) => meWorkApi.checkOut(eventId),
-  });
-  const taskMutation = useMutation({
-    mutationFn: ({ taskId, status }) => meWorkApi.updateTask(taskId, { status }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['me', 'tasks'] }),
-  });
-
-  return (
-    <div className="space-y-6">
-      <div className="relative overflow-hidden rounded-2xl bg-brand-gradient p-6 text-white shadow-glow sm:p-8">
-        <div
-          className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"
-          aria-hidden
+      {/* Metrics Row */}
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <KPICard
+          label="Catering Events"
+          value={events.length}
+          hint={`${upcomingEvents.length} active / upcoming`}
+          icon="📅"
+          tone="brand"
         />
-        <h2 className="relative text-lg font-semibold tracking-tight">Welcome back, {user?.full_name?.split(' ')[0]}</h2>
-        <p className="relative mt-1 text-sm text-white/80 capitalize">{membership?.job_title || membership?.employment_role}</p>
+        <KPICard label="Customer Records" value={customers.length} icon="👥" />
+        <KPICard
+          label="Workforce Assignments"
+          value={assignments.length}
+          hint="Hired across events"
+          icon="🧑‍🍳"
+        />
+        <KPICard
+          label="Business Status"
+          value={company?.status === 'approved' ? 'Active' : company?.status || 'Pending'}
+          hint={company?.name || 'Catering Co.'}
+          icon="🏢"
+          tone={company?.status === 'approved' ? 'brand' : 'accent'}
+        />
       </div>
 
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-neutral-900">My assignments</h3>
-        {loadingAssignments ? (
-          <SkeletonRows rows={2} />
-        ) : assignments.length === 0 ? (
+      {/* Upcoming Events List */}
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-base font-semibold text-neutral-900">Upcoming Events</h2>
+            <p className="text-xs text-neutral-500">Upcoming catering banquets and deliveries</p>
+          </div>
+          <Link to="/employer/events" className="text-xs font-semibold text-brand-700 hover:underline">
+            View all events →
+          </Link>
+        </div>
+
+        {upcomingEvents.length === 0 ? (
           <EmptyState
-            icon="🗓️"
-            title="No assignments yet"
-            description="Events you're assigned to will show up here."
+            icon="🎉"
+            title="No upcoming events"
+            description="Create your first event from the Events tab or add a customer to get started."
           />
         ) : (
-          <div className="card divide-y divide-neutral-100">
-            {assignments.map((a) => (
-              <div key={a.id} className="flex flex-wrap items-center justify-between gap-3 p-4">
+          <div className="divide-y divide-neutral-100">
+            {upcomingEvents.slice(0, 5).map((e) => (
+              <Link
+                key={e.id}
+                to={`/employer/events/${e.id}`}
+                className="flex items-center justify-between py-3 hover:bg-neutral-50 rounded-lg px-2 -mx-2 transition"
+              >
                 <div>
-                  <p className="text-sm font-medium text-neutral-900">{a.event_title}</p>
-                  <p className="text-xs text-neutral-500">
-                    {new Date(a.event_date).toLocaleDateString()} · {a.guest_count} guests
-                    {a.venue_name ? ` · ${a.venue_name}` : ''} · Your role: {a.event_role.replace('_', ' ')}
+                  <p className="text-sm font-semibold text-neutral-900">{e.title}</p>
+                  <p className="text-xs text-neutral-500 mt-0.5">
+                    {new Date(e.event_date).toLocaleDateString()} · {e.guest_count} guests
+                    {e.customer && ` · Customer: ${e.customer.name}`}
+                    {e.venue_name && ` · 📍 ${e.venue_name}`}
                   </p>
                 </div>
-                <div className="flex gap-2">
-                  <button
-                    className="btn-secondary text-xs"
-                    disabled={checkInMutation.isPending}
-                    onClick={() => checkInMutation.mutate(a.event_id)}
-                  >
-                    Check in
-                  </button>
-                  <button
-                    className="btn-secondary text-xs"
-                    disabled={checkOutMutation.isPending}
-                    onClick={() => checkOutMutation.mutate(a.event_id)}
-                  >
-                    Check out
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div>
-        <h3 className="mb-3 text-sm font-semibold text-neutral-900">My tasks</h3>
-        {loadingTasks ? (
-          <SkeletonRows rows={2} />
-        ) : tasks.length === 0 ? (
-          <EmptyState icon="✅" title="No tasks assigned" description="Tasks assigned to you will show up here." />
-        ) : (
-          <div className="card divide-y divide-neutral-100">
-            {tasks.map((t) => (
-              <label key={t.id} className="flex items-center gap-3 p-4 text-sm">
-                <input
-                  type="checkbox"
-                  checked={t.status === 'done'}
-                  onChange={(e) => taskMutation.mutate({ taskId: t.id, status: e.target.checked ? 'done' : 'todo' })}
-                  className="h-4 w-4 accent-brand-600"
-                />
-                <span className={t.status === 'done' ? 'text-neutral-400 line-through' : 'text-neutral-800'}>
-                  {t.title}
-                </span>
-                <span className="ml-auto text-xs text-neutral-400">{t.phase.replace('_', ' ')}</span>
-              </label>
+                <StatusBadge status={e.status} />
+              </Link>
             ))}
           </div>
         )}
