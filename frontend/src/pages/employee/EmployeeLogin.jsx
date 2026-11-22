@@ -7,6 +7,7 @@ export default function EmployeeLogin() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -15,7 +16,7 @@ export default function EmployeeLogin() {
     setError('');
     setSubmitting(true);
     try {
-      await loginEmployee(email, password);
+      await loginEmployee(email.trim(), password);
       navigate('/employee', { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid credentials or inactive account');
@@ -24,8 +25,14 @@ export default function EmployeeLogin() {
     }
   }
 
+  const fillCredentials = (fillEmail, fillPass) => {
+    setEmail(fillEmail);
+    setPassword(fillPass);
+    setError('');
+  };
+
   return (
-    <div className="flex min-h-screen">
+    <div className="flex min-h-screen bg-slate-50">
       <div className="relative hidden w-[42%] flex-col justify-between overflow-hidden bg-gradient-to-br from-emerald-800 to-teal-900 p-10 text-white lg:flex">
         <div className="pointer-events-none absolute inset-0 bg-noise opacity-20" aria-hidden />
         <Link to="/" className="relative flex items-center gap-2">
@@ -48,13 +55,21 @@ export default function EmployeeLogin() {
         <div className="text-xs text-white/60">Independent Catering Workforce Network</div>
       </div>
 
-      <div className="flex flex-1 items-center justify-center bg-canvas px-4 py-12">
-        <div className="w-full max-w-sm">
-          <h1 className="text-2xl font-semibold tracking-tight text-neutral-900">Employee Login</h1>
-          <p className="mt-1 text-sm text-neutral-500">Sign in to browse shifts and manage attendance.</p>
+      <div className="flex flex-1 items-center justify-center px-4 py-12">
+        <div className="w-full max-w-sm space-y-6">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight text-neutral-900">Employee Login</h1>
+            <p className="mt-1 text-xs text-neutral-500">Sign in to browse shifts and manage attendance.</p>
+          </div>
 
-          <form onSubmit={handleSubmit} className="card mt-6 space-y-4 p-6">
-            {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+          {error && (
+            <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700 flex items-start gap-2">
+              <span className="text-red-500 mt-0.5">⚠️</span>
+              <div className="flex-1 font-medium">{error}</div>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="card space-y-4 p-6 shadow-sm">
             <div>
               <label className="label">Email Address</label>
               <input
@@ -67,9 +82,18 @@ export default function EmployeeLogin() {
               />
             </div>
             <div>
-              <label className="label">Password</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="label mb-0">Password</label>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="text-xs text-neutral-400 hover:text-neutral-600 transition"
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 className="input"
                 value={password}
@@ -77,26 +101,39 @@ export default function EmployeeLogin() {
                 placeholder="••••••••"
               />
             </div>
-            <button type="submit" disabled={submitting} className="btn-primary w-full bg-emerald-600 hover:bg-emerald-700">
-              {submitting ? 'Signing in…' : 'Log In as Employee'}
+            <button type="submit" disabled={submitting} className="btn-primary w-full bg-emerald-700 hover:bg-emerald-800">
+              {submitting ? 'Authenticating…' : 'Log In as Employee'}
             </button>
+
+            {/* Quick-fill preset */}
+            <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-xs">
+              <span className="text-neutral-400 font-medium">Demo Staff:</span>
+              <button
+                type="button"
+                onClick={() => fillCredentials('rahul.chef@grandregency.com', 'Password@123')}
+                className="text-emerald-700 font-semibold hover:underline"
+              >
+                Fill Credentials →
+              </button>
+            </div>
           </form>
 
-          <p className="mt-5 text-center text-sm text-neutral-500">
-            Looking for catering work?{' '}
-            <Link to="/register/employee" className="font-semibold text-emerald-700 hover:underline">
-              Register as Employee
-            </Link>
-          </p>
-          <p className="mt-2 text-center text-xs text-neutral-400">
-            Are you a caterer?{' '}
-            <Link to="/employer/login" className="text-brand-600 hover:underline">
-              Log in as Employer
-            </Link>
-          </p>
+          <div className="text-center space-y-2">
+            <p className="text-xs text-neutral-500">
+              New to Plated workforce?{' '}
+              <Link to="/register/employee" className="font-semibold text-emerald-700 hover:underline">
+                Create staff profile
+              </Link>
+            </p>
+            <p className="text-xs text-neutral-400">
+              Catering business owner?{' '}
+              <Link to="/employer/login" className="text-neutral-600 hover:underline">
+                Log in as Employer
+              </Link>
+            </p>
+          </div>
         </div>
       </div>
     </div>
   );
 }
-

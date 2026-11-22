@@ -7,19 +7,33 @@ async function request(path, { method = 'GET', body, auth = false } = {}) {
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`${BASE_URL}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (err) {
+    throw new Error('Unable to connect to the backend server. Please verify the service is running.');
+  }
 
   if (!res.ok) {
-    let detail = res.statusText;
+    let detail = res.statusText || 'Request failed';
     try {
       const data = await res.json();
       detail = data.detail || detail;
     } catch {
-      // no JSON body
+      // not JSON
+      try {
+        const text = await res.text();
+        if (text && text.length < 200) detail = text;
+      } catch {
+        // ignore
+      }
+    }
+    if (res.status === 500 && (detail === 'Internal Server Error' || !detail)) {
+      detail = 'Server error encountered. The backend service may be restarting or unavailable.';
     }
     throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail));
   }

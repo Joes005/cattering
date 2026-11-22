@@ -7,6 +7,7 @@ export default function CustomerLogin() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -15,7 +16,7 @@ export default function CustomerLogin() {
     setError('');
     setSubmitting(true);
     try {
-      await loginCustomer(email, password);
+      await loginCustomer(email.trim(), password);
       navigate('/customer', { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid credentials or inactive customer account');
@@ -24,8 +25,14 @@ export default function CustomerLogin() {
     }
   }
 
+  const fillCredentials = (fillEmail, fillPass) => {
+    setEmail(fillEmail);
+    setPassword(fillPass);
+    setError('');
+  };
+
   return (
-    <div className="flex min-h-screen bg-gray-50">
+    <div className="flex min-h-screen bg-slate-50">
       {/* Brand Hero Banner */}
       <div className="relative hidden w-[42%] flex-col justify-between overflow-hidden bg-gradient-to-br from-indigo-900 via-indigo-950 to-slate-900 p-12 text-white lg:flex">
         <div className="pointer-events-none absolute inset-0 bg-noise opacity-20" aria-hidden />
@@ -72,27 +79,27 @@ export default function CustomerLogin() {
 
       {/* Login Form */}
       <div className="flex flex-1 flex-col justify-center px-6 py-12 sm:px-12 lg:px-16">
-        <div className="mx-auto w-full max-w-md space-y-8">
+        <div className="mx-auto w-full max-w-md space-y-6">
           <div>
-            <span className="inline-block rounded-full bg-indigo-50 text-indigo-700 px-3 py-1 text-xs font-semibold uppercase tracking-wider mb-3">
+            <span className="inline-block rounded-full bg-indigo-50 text-indigo-700 px-3 py-1 text-xs font-semibold uppercase tracking-wider mb-2">
               Customer Sign In
             </span>
             <h2 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-3xl">
               Welcome back
             </h2>
-            <p className="mt-2 text-xs text-gray-500">
+            <p className="mt-1 text-xs text-gray-500">
               Sign in to track your event inquiries, approve quotations, and manage payments.
             </p>
           </div>
 
           {error && (
-            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-700 flex items-center gap-2">
-              <span className="text-sm">⚠️</span>
-              {error}
+            <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-xs text-rose-700 flex items-start gap-2">
+              <span className="text-rose-500 text-sm mt-0.5">⚠️</span>
+              <div className="flex-1 font-medium">{error}</div>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-4 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
             <div>
               <label className="block text-xs font-semibold text-gray-700 mb-1">Email Address</label>
               <input
@@ -106,9 +113,18 @@ export default function CustomerLogin() {
             </div>
 
             <div>
-              <label className="block text-xs font-semibold text-gray-700 mb-1">Password</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-xs font-semibold text-gray-700">Password</label>
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="text-xs text-gray-400 hover:text-gray-600 transition"
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
               <input
-                type="password"
+                type={showPassword ? 'text' : 'password'}
                 required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -129,9 +145,21 @@ export default function CustomerLogin() {
                 </>
               )}
             </button>
+
+            {/* Quick-fill preset */}
+            <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+              <span className="text-gray-400 font-medium">Demo Customer:</span>
+              <button
+                type="button"
+                onClick={() => fillCredentials('customer_cbd3def8@platedtest.com', 'Password@123')}
+                className="text-indigo-600 font-semibold hover:underline"
+              >
+                Fill Credentials →
+              </button>
+            </div>
           </form>
 
-          <div className="pt-4 border-t border-gray-200 space-y-3 text-center">
+          <div className="pt-2 border-t border-gray-200 space-y-3 text-center">
             <p className="text-xs text-gray-500">
               New to PLATED?{' '}
               <Link to="/register/customer" className="font-semibold text-indigo-600 hover:text-indigo-800">
@@ -140,7 +168,7 @@ export default function CustomerLogin() {
             </p>
             <p className="text-xs text-gray-400">
               Catering business owner?{' '}
-              <Link to="/login" className="font-medium text-gray-600 hover:text-gray-900 underline">
+              <Link to="/employer/login" className="font-medium text-gray-600 hover:text-gray-900 underline">
                 Employer Login
               </Link>
               {' '}&middot;{' '}
