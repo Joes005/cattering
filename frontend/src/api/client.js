@@ -1,4 +1,19 @@
-const BASE_URL = '/api';
+const getBaseUrl = () => {
+  if (import.meta.env.VITE_API_URL) {
+    return import.meta.env.VITE_API_URL;
+  }
+  if (
+    typeof window !== 'undefined' &&
+    (window.Capacitor?.isNativePlatform?.() ||
+      window.location.protocol === 'capacitor:' ||
+      (window.location.hostname === 'localhost' && (!window.location.port || window.location.port === '80')))
+  ) {
+    return 'http://localhost:8000/api';
+  }
+  return '/api';
+};
+
+const BASE_URL = getBaseUrl();
 
 async function request(path, { method = 'GET', body, auth = false } = {}) {
   const headers = { 'Content-Type': 'application/json' };

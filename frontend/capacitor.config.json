@@ -1,0 +1,9 @@
+{
+  "appId": "com.plated.app",
+  "appName": "Plated",
+  "webDir": "dist",
+  "server": {
+    "cleartext": true,
+    "androidScheme": "http"
+  }
+}
