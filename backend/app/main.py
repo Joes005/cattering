@@ -1,5 +1,8 @@
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.core.config import settings
 from app.db.database import Base, engine
@@ -26,6 +29,7 @@ from app.routers import (
     tasks,
 )
 
+os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
@@ -36,7 +40,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.CLIENT_URL, "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,8 +85,15 @@ app.include_router(audit_logs.router)
 
 @app.get("/api/health")
 def health():
+    db_status = "connected"
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        db_status = "unavailable"
     return {
         "status": "ok",
+        "database": db_status,
         "platform": "Plated",
         "roles": ["admin", "employer", "employee", "customer"],
         "architecture": "4-role-hybrid-saas-marketplace",
