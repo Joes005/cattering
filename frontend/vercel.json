@@ -1,5 +1,7 @@
 {
   "rewrites": [
+    { "source": "/api/:path*", "destination": "https://plated-7rut.onrender.com/api/:path*" },
+    { "source": "/files/:path*", "destination": "https://plated-7rut.onrender.com/files/:path*" },
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }
